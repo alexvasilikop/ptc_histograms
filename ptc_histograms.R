@@ -1,4 +1,5 @@
 library(ggplot2)
+library(dplyr)
 
 ############################################################################################
 plot_histogram_read_counts_per_target <- function (x=vector(), count=numeric(), id=character(), max_value=numeric()) {
@@ -17,19 +18,51 @@ plot_histogram_read_counts_per_target <- function (x=vector(), count=numeric(), 
     output_file <- paste0(id, "_histogram_of_read_counts_per_target_", count, ".pdf")
     median_value=median(data_v$values)
     #add median dashed line to histogram
-    g <- ggplot(data = data_v, aes(x=values)) + geom_histogram(binwidth=50, color="black", fill="lightsteelblue3") + 
+    h <- ggplot(data = data_v, aes(x=values)) + geom_histogram(binwidth=50, color="black", fill="lightsteelblue3") + 
                                                 geom_vline(aes(xintercept=median_value), color="red", linetype="dashed", linewidth=1.3) +
                                                 annotate("text", median_value, y=10, color="red", label=paste("Median:", round(median_value)), vjust = 3.0, hjust=1.1, size = 4) +
                                                 labs(title = paste0("Read counts per target, req. sample id: ", id), x = "Read counts per target", y = "Frequency") + 
                                                 theme_minimal()
     #save plot to pdf file
-    ggsave(output_file, plot = g)
+    ggsave(output_file, plot = h)
 
     # Check if the file is created and is non-zero size
     if (file.info(output_file)$size == 0) {
         stop("Error: PDF file is empty, something went wrong with the plot creation.")
     }
 }
+
+plot_violinplot_across_samples <- function(x=data.frame(), selected_column=character()) {
+    #data frame should have 2 columns one with normalized values for targets and one with the sample id the target belongs to
+
+    if (!selected_column %in% colnames(x)){
+        stop("Error in violinplot: requested column does not exist")
+    }
+
+    if (! "sample_id" %in% colnames(x)){
+        stop("Error in violinplot: requested column 'sample_id' does not exist")
+    }
+
+    #transform for plotting
+    new_df <- data.frame(sample_id=x$sample_id, values=as.numeric(x[[selected_column]]))
+    new_df <- new_df[!is.na(new_df$values),]
+
+    #create output file name
+    output_file=paste0("violin_plots-", selected_column, "-across_samples.pdf")
+
+    v <- ggplot(data=new_df, aes(x=sample_id, y=values)) + 
+         geom_violin(scale="area", color="black", fill="lightsteelblue4") +
+         geom_boxplot(width = 0.12, color = "black", outlier.colour = "red2", outlier.shape = 16, outlier.size = 1) +
+         labs(title=paste("Violin plots of", selected_column, "across samples"), x=selected_column, y="Sample id") + 
+         theme_minimal()
+
+    ggsave(output_file, plot=v)
+
+    if (file.info(output_file)$size == 0) {
+        stop("Error: PDF file with violin plots is empty, something went wrong with the plot creation.")
+    }
+}
+
 ##########################################################################################################
 
 args <- commandArgs(trailingOnly = TRUE)
@@ -56,12 +89,12 @@ names.data.frames <- lapply(data.list, strsplit, "/")
 names.data.files <- lapply(names.data.frames, function(l){tail(tail(l[[1]],1),1)})
 
 #using file names to extract first entry after splitting with "." -> this is the request sample id
-req.sample.ids <- sapply(names.data.files, function (x){head(unlist(strsplit(x, "\\."))[[1]],1)})
+sample.ids <- sapply(names.data.files, function (x){head(unlist(strsplit(x, "\\."))[[1]],1)})
 
 #Get read counts in a list of vectors
 read.counts <- lapply(data.frames, function(df) {df$read_count})
 #add req sample ids as names
-read.counts <- setNames(read.counts, req.sample.ids)
+read.counts <- setNames(read.counts, sample.ids)
 
 #plot histograms of read counts per target
 c <- 1
@@ -71,3 +104,37 @@ for (id in names(read.counts)) {
     c <- c+1
 }
 
+df_boxplot=data.frame(matrix(ncol=length(c("sample_id", "read_counts")),nrow=0))
+colnames(df_boxplot) <- c("sample_id", "read_counts")
+
+#plot_violinplots read counts across samples -> transform to 2 columns df with sample_id and read_counts
+c <- 1
+for (id in names(read.counts)) {
+    v.names=rep(id, times=length(read.counts[[id]]))
+    df_boxplot <- rbind(df_boxplot, data.frame(sample_id=v.names, read_counts=read.counts[[id]]))
+    cat("Length of dataframe after adding ", c, " samples", length(df_boxplot$sample_id), "\n" )
+    c <- c+1
+}
+#plot
+plot_violinplot_across_samples(df_boxplot, "read_counts")
+
+
+#Get normalized coverages
+#Get normalized coverages in a list of vectors (one vector for each sample)
+norm.cov <- lapply(data.frames, function(df) {df$normalized_coverage})
+#add req sample ids as names
+norm.cov <- setNames(norm.cov, sample.ids)
+
+#plot_violinplots_normalized_coverage_across_samples -> transform to 2 columns df with 1) sample_ids and 2) normalized_coverages
+df_boxplot=data.frame(matrix(ncol=length(c("sample_id", "read_counts")),nrow=0))
+colnames(df_boxplot) <- c("sample_id", "normalized_coverage")
+
+c <- 1
+for (id in names(norm.cov)) {
+    v.names=rep(id, times=length(norm.cov[[id]]))
+    df_boxplot <- rbind(df_boxplot, data.frame(sample_id=v.names, normalized_coverage=norm.cov[[id]]))
+    cat("Length of dataframe after adding ", c, " samples", length(df_boxplot$sample_id), "\n" )
+    c <- c+1
+}
+#plot
+plot_violinplot_across_samples(df_boxplot, "normalized_coverage")
